@@ -1,18 +1,19 @@
-import nodemailer from 'nodemailer'
-import { EmailOptions, EmailService } from '@/interfaces/email.interface'
+import nodemailer from "nodemailer"
+import { EmailOptions, EmailService } from "@/interfaces/email.interface"
+import { ENVIRONMENT } from "@/config"
 
 class NodemailerEmailService implements EmailService {
   private transporter: nodemailer.Transporter
 
   constructor() {
     this.transporter = nodemailer.createTransport({
-      service: process.env.EMAIL_SERVICE || 'gmail',
-      host: process.env.EMAIL_HOST || 'smtp.example.com',
-      port: Number(process.env.EMAIL_PORT) || 587,
-      secure: process.env.EMAIL_SECURE === 'true',
+      service: ENVIRONMENT.EMAIL_SERVICE,
+      host: ENVIRONMENT.EMAIL_HOST,
+      port: ENVIRONMENT.EMAIL_PORT,
+      secure: ENVIRONMENT.EMAIL_SECURE === "true",
       auth: {
-        user: process.env.EMAIL_USER || '',
-        pass: process.env.EMAIL_PASSWORD || '',
+        user: ENVIRONMENT.EMAIL_USER,
+        pass: ENVIRONMENT.EMAIL_PASSWORD,
       },
     })
   }
@@ -22,7 +23,7 @@ class NodemailerEmailService implements EmailService {
       const { to, subject, text, html } = options
 
       await this.transporter.sendMail({
-        from: process.env.EMAIL_FROM || 'noreply@example.com',
+        from: ENVIRONMENT.EMAIL_FROM,
         to,
         subject,
         text,
@@ -31,7 +32,7 @@ class NodemailerEmailService implements EmailService {
 
       return true
     } catch (error) {
-      console.error('Error sending email:', error)
+      console.error("Error sending email:", error)
       return false
     }
   }
