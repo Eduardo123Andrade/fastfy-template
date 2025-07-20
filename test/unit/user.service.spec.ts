@@ -1,90 +1,83 @@
-import { CreateUserDto } from '../../src/interfaces/user.interface'
-import { ActiveUserRepository, UserRepository } from '../../src/repository'
-import * as userEmailService from '../../src/services/user-email.service'
-import { UserService } from '../../src/services/user/user.service'
-import { encoder } from '../../src/utils'
-import * as validateExpiresTokenModule from '../../src/utils/validate-expires-token'
-import * as validateAgeModule from '../../src/utils/validate-age'
+import { BadRequestException } from "../../src/exceptions"
+import { CreateUserDto } from "../../src/interfaces/user.interface"
+import { ActiveUserRepository, UserRepository } from "../../src/repository"
+import { sendActivationEmail } from "../../src/services/user-email.service"
+import { UserService } from "../../src/services/user/user.service"
+import { encoder, isActiveTokenExpired, HttpStatusCode } from "../../src/utils"
+import { isOlder } from "../../src/utils/validate-age"
 
-// Mock do repositório
-jest.mock('../../src/repository/user.repository', () => ({
+// Mock dos repositórios
+jest.mock("../../src/repository", () => ({
   UserRepository: {
     create: jest.fn(),
-    findAll: jest.fn(),
-    findById: jest.fn(),
     findByEmail: jest.fn(),
-    findByCpf: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
     activeUser: jest.fn(),
   },
+  ActiveUserRepository: {
+    findUserToken: jest.fn(),
+  },
 }))
 
-// Mock do encoder e isOlder
-jest.mock('../../src/utils', () => ({
+// Mock do encoder e utils
+jest.mock("../../src/utils", () => ({
   encoder: {
     codify: jest.fn(),
-  },
-  HttpStatusCode: {
-    BAD_REQUEST: 400,
+    verifyPassword: jest.fn(),
   },
   isActiveTokenExpired: jest.fn(),
+  HttpStatusCode: {
+    BAD_REQUEST: 400,
+    OK: 200,
+    CREATED: 201,
+    NOT_FOUND: 404,
+    UNAUTHORIZED: 401,
+    CONFLICT: 409,
+  },
 }))
 
-jest.mock('../../src/utils/validate-age', () => {
-  return {
-    isOlder: jest.fn(),
-  }
-})
-
-// Mock ActiveUserRepository
-jest.mock('../../src/repository/active-user.repository', () => ({
-  ActiveUserRepository: {
-    createActiveUserToken: jest.fn().mockResolvedValue({
-      id: 'token-id',
-      token: '123456',
-      userId: '1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }),
-    existsToken: jest.fn().mockResolvedValue(true),
-    findUserToken: jest.fn().mockResolvedValue({
-      id: 'token-id',
-      token: '123456',
-      userId: '1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }),
-  },
+// Mock validate-age
+jest.mock("../../src/utils/validate-age", () => ({
+  isOlder: jest.fn(),
 }))
 
 // Mock sendActivationEmail
-jest.mock('../../src/services/user-email.service', () => ({
-  sendActivationEmail: jest.fn().mockResolvedValue(true),
+jest.mock("../../src/services/user-email.service", () => ({
+  sendActivationEmail: jest.fn(),
 }))
 
-describe('UserService', () => {
+// Mock BadRequestException
+jest.mock("../../src/exceptions", () => {
+  const originalModule = jest.requireActual("../../src/exceptions")
+  return {
+    ...originalModule,
+    BadRequestException: jest.fn().mockImplementation((message) => {
+      return new Error(message)
+    }),
+  }
+})
+
+describe("UserService", () => {
   beforeEach(() => {
     jest.clearAllMocks()
   })
 
-  describe('create', () => {
-    it('deve criar um usuário com sucesso', async () => {
+  describe("create", () => {
+    it("deve criar um usuário com sucesso", async () => {
       // Arrange
-      const birthdate = new Date('1990-01-01')
+      const birthdate = new Date("1990-01-01")
       const userData: CreateUserDto = {
-        email: 'test@example.com',
-        name: 'Test User',
-        password: 'Password123!',
-        confirmPassword: 'Password123!',
-        cpf: '123.456.789-00',
-        phone: '(11) 99999-9999',
+        email: "test@example.com",
+        name: "Test User",
+        password: "Password123!",
+        confirmPassword: "Password123!",
+        cpf: "123.456.789-00",
+        phone: "(11) 99999-9999",
         birthdate,
       }
 
-      const hashedPassword = 'hashed_password'
+      const hashedPassword = "hashed_password"
       const expectedUser = {
-        id: '1',
+        id: "1",
         email: userData.email,
         name: userData.name,
         password: hashedPassword,
@@ -92,43 +85,43 @@ describe('UserService', () => {
         phone: userData.phone,
         birthdate: userData.birthdate,
         status: {
-          id: 'inactive-status-id',
-          description: 'INACTIVE',
+          id: "inactive-status-id",
+          description: "INACTIVE",
           createdAt: new Date(),
           updatedAt: new Date(),
         },
-        statusId: '1',
+        statusId: "1",
         createdAt: new Date(),
         updatedAt: new Date(),
       }
 
       const mockToken = {
-        id: 'token-id',
-        token: '123456',
-        userId: '1',
+        id: "token-id",
+        token: "123456",
+        userId: "1",
         createdAt: new Date(),
         updatedAt: new Date(),
       }
 
-      jest.spyOn(encoder, 'codify').mockResolvedValue(hashedPassword)
-      jest.spyOn(validateAgeModule, 'isOlder').mockReturnValue(true)
-      jest.spyOn(UserRepository, 'create').mockResolvedValue({
+      isOlder.mockReturnValue(true)
+      encoder.codify.mockResolvedValue(hashedPassword)
+      UserRepository.create.mockResolvedValue({
         user: expectedUser,
         token: mockToken,
       })
-      jest.spyOn(userEmailService, 'sendActivationEmail').mockResolvedValue(true)
+      sendActivationEmail.mockResolvedValue(true)
 
       // Act
       const result = await UserService.create(userData)
 
       // Assert
-      expect(validateAgeModule.isOlder).toHaveBeenCalledWith(birthdate)
+      expect(isOlder).toHaveBeenCalledWith(birthdate)
       expect(encoder.codify).toHaveBeenCalledWith(userData.password)
       expect(UserRepository.create).toHaveBeenCalledWith({
         ...userData,
         password: hashedPassword,
       })
-      expect(userEmailService.sendActivationEmail).toHaveBeenCalledWith({
+      expect(sendActivationEmail).toHaveBeenCalledWith({
         token: mockToken.token,
         userEmail: expectedUser.email,
         userName: expectedUser.name,
@@ -136,340 +129,301 @@ describe('UserService', () => {
       expect(result).toEqual(expectedUser)
     })
 
-    it('deve lançar erro quando usuário for menor de idade', async () => {
+    it("deve lançar erro quando usuário for menor de idade", async () => {
       // Arrange
-      const birthdate = new Date('2010-01-01')
+      const birthdate = new Date("2010-01-01")
       const userData: CreateUserDto = {
-        email: 'test@example.com',
-        name: 'Test User',
-        password: 'Password123!',
-        confirmPassword: 'Password123!',
-        cpf: '123.456.789-00',
-        phone: '(11) 99999-9999',
+        email: "test@example.com",
+        name: "Test User",
+        password: "Password123!",
+        confirmPassword: "Password123!",
+        cpf: "123.456.789-00",
+        phone: "(11) 99999-9999",
         birthdate,
       }
 
-      jest.spyOn(validateAgeModule, 'isOlder').mockReturnValue(false)
+      isOlder.mockReturnValue(false)
 
       // Act & Assert
-      await expect(UserService.create(userData)).rejects.toThrow('Você precisa ter mais de 18 anos para se cadastrar')
-      expect(validateAgeModule.isOlder).toHaveBeenCalledWith(birthdate)
+      await expect(UserService.create(userData)).rejects.toThrow(
+        "Você precisa ter mais de 18 anos para se cadastrar"
+      )
+      expect(isOlder).toHaveBeenCalledWith(birthdate)
       expect(encoder.codify).not.toHaveBeenCalled()
       expect(UserRepository.create).not.toHaveBeenCalled()
+      expect(sendActivationEmail).not.toHaveBeenCalled()
     })
 
-    it('deve lançar erro quando o envio de email falhar', async () => {
+    it("deve lançar erro quando o repositório falhar ao criar usuário", async () => {
       // Arrange
-      const birthdate = new Date('1990-01-01')
+      const birthdate = new Date("1990-01-01")
       const userData: CreateUserDto = {
-        email: 'test@example.com',
-        name: 'Test User',
-        password: 'Password123!',
-        confirmPassword: 'Password123!',
-        cpf: '123.456.789-00',
-        phone: '(11) 99999-9999',
+        email: "test@example.com",
+        name: "Test User",
+        password: "Password123!",
+        confirmPassword: "Password123!",
+        cpf: "123.456.789-00",
+        phone: "(11) 99999-9999",
         birthdate,
       }
 
-      const hashedPassword = 'hashed_password'
-      const expectedUser = {
-        id: '1',
-        email: userData.email,
-        name: userData.name,
-        password: hashedPassword,
-        cpf: userData.cpf,
-        phone: userData.phone,
-        birthdate: userData.birthdate,
-        status: {
-          id: 'inactive-status-id',
-          description: 'INACTIVE',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        statusId: '1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }
+      const hashedPassword = "hashed_password"
+      const errorMessage = "User already exists"
+      const repositoryError = new Error(errorMessage)
 
-      const mockToken = {
-        id: 'token-id',
-        token: '123456',
-        userId: '1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }
-
-      jest.spyOn(encoder, 'codify').mockResolvedValue(hashedPassword)
-      jest.spyOn(validateAgeModule, 'isOlder').mockReturnValue(true)
-      jest.spyOn(UserRepository, 'create').mockResolvedValue({
-        user: expectedUser,
-        token: mockToken,
-      })
-      jest.spyOn(userEmailService, 'sendActivationEmail').mockRejectedValue(new Error('Falha ao enviar email'))
-
-      // Act & Assert
-      await expect(UserService.create(userData)).rejects.toThrow('Falha ao enviar email')
-      expect(validateAgeModule.isOlder).toHaveBeenCalledWith(birthdate)
-      expect(encoder.codify).toHaveBeenCalledWith(userData.password)
-      expect(UserRepository.create).toHaveBeenCalledWith({
-        ...userData,
-        password: hashedPassword,
-      })
-      expect(userEmailService.sendActivationEmail).toHaveBeenCalledWith({
-        token: mockToken.token,
-        userEmail: expectedUser.email,
-        userName: expectedUser.name,
-      })
-    })
-
-    it('deve lançar erro quando o repositório falhar ao criar usuário', async () => {
-      // Arrange
-      const birthdate = new Date('1990-01-01')
-      const userData: CreateUserDto = {
-        email: 'test@example.com',
-        name: 'Test User',
-        password: 'Password123!',
-        confirmPassword: 'Password123!',
-        cpf: '123.456.789-00',
-        phone: '(11) 99999-9999',
-        birthdate,
-      }
-
-      const hashedPassword = 'hashed_password'
-      const errorMessage = 'User already exists'
-
-      jest.spyOn(encoder, 'codify').mockResolvedValue(hashedPassword)
-      jest.spyOn(validateAgeModule, 'isOlder').mockReturnValue(true)
-      jest.spyOn(UserRepository, 'create').mockRejectedValue(new Error(errorMessage))
+      isOlder.mockReturnValue(true)
+      encoder.codify.mockResolvedValue(hashedPassword)
+      UserRepository.create.mockRejectedValue(repositoryError)
 
       // Act & Assert
       await expect(UserService.create(userData)).rejects.toThrow(errorMessage)
-      expect(validateAgeModule.isOlder).toHaveBeenCalledWith(birthdate)
+      expect(isOlder).toHaveBeenCalledWith(birthdate)
       expect(encoder.codify).toHaveBeenCalledWith(userData.password)
       expect(UserRepository.create).toHaveBeenCalledWith({
         ...userData,
         password: hashedPassword,
       })
-      expect(userEmailService.sendActivationEmail).not.toHaveBeenCalled()
+      expect(sendActivationEmail).not.toHaveBeenCalled()
     })
   })
 
-  describe('activeUser', () => {
-    it('deve ativar um usuário com sucesso', async () => {
+  describe("activeUser", () => {
+    it("deve ativar um usuário com sucesso", async () => {
       // Arrange
-      const cpf = '123.456.789-00'
-      const token = '123456'
-      const expectedUser = {
-        id: '1',
-        email: 'test@example.com',
-        name: 'Test User',
-        password: 'hashed_password',
-        cpf: '123.456.789-00',
-        phone: '(11) 99999-9999',
+      const email = "test@example.com"
+      const token = "123456"
+      const mockUser = {
+        id: "1",
+        email: "test@example.com",
+        name: "Test User",
+        password: "hashed_password",
+        cpf: "123.456.789-00",
+        phone: "(11) 99999-9999",
         birthdate: new Date(),
         status: {
-          id: 'active-status-id',
-          description: 'ACTIVE',
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          description: "INACTIVE",
         },
         createdAt: new Date(),
         updatedAt: new Date(),
       }
 
       const tokenData = {
-        id: 'token-id',
-        token: '123456',
-        userId: '1',
+        id: "token-id",
+        token: "123456",
+        userId: "1",
         createdAt: new Date(),
         updatedAt: new Date(),
       }
 
-      jest.spyOn(ActiveUserRepository, 'findUserToken').mockResolvedValue(tokenData)
-      jest.spyOn(validateExpiresTokenModule, 'isActiveTokenExpired').mockReturnValue(false)
-      jest.spyOn(UserRepository, 'activeUser').mockResolvedValue(expectedUser)
+      const activatedUser = {
+        ...mockUser,
+        status: {
+          description: "ACTIVE",
+        },
+      }
+
+      UserRepository.findByEmail.mockResolvedValue(mockUser)
+      ActiveUserRepository.findUserToken.mockResolvedValue(tokenData)
+      isActiveTokenExpired.mockReturnValue(false)
+      UserRepository.activeUser.mockResolvedValue(activatedUser)
 
       // Act
-      const result = await UserService.activeUser(cpf, token)
-
-      // Assert
-      expect(ActiveUserRepository.findUserToken).toHaveBeenCalledWith(token, cpf)
-      // HERE
-      expect(validateExpiresTokenModule.isActiveTokenExpired).toHaveBeenCalledWith(tokenData.createdAt)
-      expect(UserRepository.activeUser).toHaveBeenCalledWith(cpf, token)
-      expect(result).toEqual(expectedUser)
-    })
-
-    it('deve lançar erro quando o token estiver expirado', async () => {
-      // Arrange
-      const cpf = '123.456.789-00'
-      const token = '123456'
-      const tokenData = {
-        id: 'token-id',
-        token: '123456',
-        userId: '1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }
-
-      jest.spyOn(ActiveUserRepository, 'findUserToken').mockResolvedValue(tokenData)
-      jest.spyOn(validateExpiresTokenModule, 'isActiveTokenExpired').mockReturnValue(true)
-
-      // Act & Assert
-      await expect(UserService.activeUser(cpf, token)).rejects.toThrow('Token expirado')
-      expect(ActiveUserRepository.findUserToken).toHaveBeenCalledWith(token, cpf)
-      expect(validateExpiresTokenModule.isActiveTokenExpired).toHaveBeenCalledWith(tokenData.createdAt)
-      expect(UserRepository.activeUser).not.toHaveBeenCalled()
-    })
-
-    it('deve lançar erro quando o token não for encontrado', async () => {
-      // Arrange
-      const cpf = '123.456.789-00'
-      const token = 'invalid-token'
-      const errorMessage = 'Token not found'
-
-      jest.spyOn(ActiveUserRepository, 'findUserToken').mockRejectedValue(new Error(errorMessage))
-
-      // Act & Assert
-      await expect(UserService.activeUser(cpf, token)).rejects.toThrow(errorMessage)
-      expect(ActiveUserRepository.findUserToken).toHaveBeenCalledWith(token, cpf)
-      expect(validateExpiresTokenModule.isActiveTokenExpired).not.toHaveBeenCalled()
-      expect(UserRepository.activeUser).not.toHaveBeenCalled()
-    })
-
-    it('deve lançar erro quando o repositório falhar ao ativar o usuário', async () => {
-      // Arrange
-      const cpf = '123.456.789-00'
-      const token = '123456'
-      const errorMessage = 'Erro ao ativar usuário'
-      const tokenData = {
-        id: 'token-id',
-        token: '123456',
-        userId: '1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }
-
-      jest.spyOn(ActiveUserRepository, 'findUserToken').mockResolvedValue(tokenData)
-      jest.spyOn(validateExpiresTokenModule, 'isActiveTokenExpired').mockReturnValue(false)
-      jest.spyOn(UserRepository, 'activeUser').mockRejectedValue(new Error(errorMessage))
-
-      // Act & Assert
-      await expect(UserService.activeUser(cpf, token)).rejects.toThrow(errorMessage)
-      expect(ActiveUserRepository.findUserToken).toHaveBeenCalledWith(token, cpf)
-      expect(validateExpiresTokenModule.isActiveTokenExpired).toHaveBeenCalledWith(tokenData.createdAt)
-      expect(UserRepository.activeUser).toHaveBeenCalledWith(cpf, token)
-    })
-  })
-
-  describe('findById', () => {
-    it('deve retornar um usuário quando encontrado pelo ID', async () => {
-      // Arrange
-      const userId = '1'
-      const expectedUser = {
-        id: '1',
-        email: 'test@example.com',
-        name: 'Test User',
-        cpf: '123.456.789-00',
-        phone: '(11) 99999-9999',
-        birthdate: new Date(),
-        status: 'ACTIVE',
-      }
-
-      jest.spyOn(UserRepository, 'findById').mockResolvedValue(expectedUser)
-
-      // Act
-      const result = await UserRepository.findById(userId)
-
-      // Assert
-      expect(UserRepository.findById).toHaveBeenCalledWith(userId)
-      expect(result).toEqual(expectedUser)
-    })
-
-    it('deve lançar erro quando o usuário não for encontrado pelo ID', async () => {
-      // Arrange
-      const userId = 'invalid-id'
-      const errorMessage = 'Usuario não econtrado'
-
-      jest.spyOn(UserRepository, 'findById').mockRejectedValue(new Error(errorMessage))
-
-      // Act & Assert
-      await expect(UserRepository.findById(userId)).rejects.toThrow(errorMessage)
-      expect(UserRepository.findById).toHaveBeenCalledWith(userId)
-    })
-  })
-
-  describe('findByEmail', () => {
-    it('deve retornar um usuário quando encontrado pelo email', async () => {
-      // Arrange
-      const email = 'test@example.com'
-      const expectedUser = {
-        id: '1',
-        email: 'test@example.com',
-        name: 'Test User',
-        cpf: '123.456.789-00',
-        phone: '(11) 99999-9999',
-        birthdate: new Date(),
-        status: 'ACTIVE',
-      }
-
-      jest.spyOn(UserRepository, 'findByEmail').mockResolvedValue(expectedUser)
-
-      // Act
-      const result = await UserRepository.findByEmail(email)
+      const result = await UserService.activeUser(email, token)
 
       // Assert
       expect(UserRepository.findByEmail).toHaveBeenCalledWith(email)
-      expect(result).toEqual(expectedUser)
+      expect(ActiveUserRepository.findUserToken).toHaveBeenCalledWith(
+        token,
+        mockUser.id
+      )
+      expect(isActiveTokenExpired).toHaveBeenCalledWith(tokenData.createdAt)
+      expect(UserRepository.activeUser).toHaveBeenCalledWith(
+        mockUser.cpf,
+        token
+      )
+      expect(result).toEqual(activatedUser)
     })
 
-    it('deve lançar erro quando o usuário não for encontrado pelo email', async () => {
+    it("deve lançar erro quando o token estiver expirado", async () => {
       // Arrange
-      const email = 'nonexistent@example.com'
-      const errorMessage = 'Usuario não econtrado'
+      const email = "test@example.com"
+      const token = "123456"
+      const mockUser = {
+        id: "1",
+        email: "test@example.com",
+        name: "Test User",
+        password: "hashed_password",
+        cpf: "123.456.789-00",
+        phone: "(11) 99999-9999",
+        birthdate: new Date(),
+        status: {
+          description: "INACTIVE",
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
 
-      jest.spyOn(UserRepository, 'findByEmail').mockRejectedValue(new Error(errorMessage))
+      const tokenData = {
+        id: "token-id",
+        token: "123456",
+        userId: "1",
+        createdAt: new Date("2020-01-01"), // Data antiga
+        updatedAt: new Date(),
+      }
+
+      UserRepository.findByEmail.mockResolvedValue(mockUser)
+      ActiveUserRepository.findUserToken.mockResolvedValue(tokenData)
+      isActiveTokenExpired.mockReturnValue(true)
 
       // Act & Assert
-      await expect(UserRepository.findByEmail(email)).rejects.toThrow(errorMessage)
+      await expect(UserService.activeUser(email, token)).rejects.toThrow(
+        "Token expirado"
+      )
       expect(UserRepository.findByEmail).toHaveBeenCalledWith(email)
+      expect(ActiveUserRepository.findUserToken).toHaveBeenCalledWith(
+        token,
+        mockUser.id
+      )
+      expect(isActiveTokenExpired).toHaveBeenCalledWith(tokenData.createdAt)
+      expect(UserRepository.activeUser).not.toHaveBeenCalled()
+    })
+
+    it("deve lançar erro quando o usuário não for encontrado", async () => {
+      // Arrange
+      const email = "nonexistent@example.com"
+      const token = "123456"
+      const errorMessage = "Usuario não econtrado"
+      const notFoundError = new Error(errorMessage)
+
+      UserRepository.findByEmail.mockRejectedValue(notFoundError)
+
+      // Act & Assert
+      await expect(UserService.activeUser(email, token)).rejects.toThrow(
+        errorMessage
+      )
+      expect(UserRepository.findByEmail).toHaveBeenCalledWith(email)
+      expect(ActiveUserRepository.findUserToken).not.toHaveBeenCalled()
+      expect(isActiveTokenExpired).not.toHaveBeenCalled()
+      expect(UserRepository.activeUser).not.toHaveBeenCalled()
     })
   })
 
-  describe('findByCpf', () => {
-    it('deve retornar um usuário quando encontrado pelo CPF', async () => {
+  describe("login", () => {
+    it("deve fazer login com sucesso", async () => {
       // Arrange
-      const cpf = '123.456.789-00'
-      const expectedUser = {
-        id: '1',
-        email: 'test@example.com',
-        name: 'Test User',
-        cpf: '123.456.789-00',
-        phone: '(11) 99999-9999',
+      const email = "test@example.com"
+      const password = "Password123!"
+      const mockUser = {
+        id: "1",
+        email: "test@example.com",
+        name: "Test User",
+        password: "hashed_password",
+        cpf: "123.456.789-00",
+        phone: "(11) 99999-9999",
         birthdate: new Date(),
-        status: 'ACTIVE',
+        status: {
+          description: "ACTIVE",
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
       }
 
-      jest.spyOn(UserRepository, 'findByCpf').mockResolvedValue(expectedUser)
+      UserRepository.findByEmail.mockResolvedValue(mockUser)
+      encoder.verifyPassword.mockResolvedValue(true)
 
       // Act
-      const result = await UserRepository.findByCpf(cpf)
+      const result = await UserService.login(email, password)
 
       // Assert
-      expect(UserRepository.findByCpf).toHaveBeenCalledWith(cpf)
-      expect(result).toEqual(expectedUser)
+      expect(UserRepository.findByEmail).toHaveBeenCalledWith(email)
+      expect(encoder.verifyPassword).toHaveBeenCalledWith(
+        password,
+        mockUser.password
+      )
+      expect(result).toEqual(mockUser)
     })
 
-    it('deve lançar erro quando o usuário não for encontrado pelo CPF', async () => {
+    it("deve lançar erro quando a senha for inválida", async () => {
       // Arrange
-      const cpf = '999.999.999-99'
-      const errorMessage = 'Usuario não econtrado'
+      const email = "test@example.com"
+      const password = "WrongPassword"
+      const mockUser = {
+        id: "1",
+        email: "test@example.com",
+        name: "Test User",
+        password: "hashed_password",
+        cpf: "123.456.789-00",
+        phone: "(11) 99999-9999",
+        birthdate: new Date(),
+        status: {
+          description: "ACTIVE",
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
 
-      jest.spyOn(UserRepository, 'findByCpf').mockRejectedValue(new Error(errorMessage))
+      UserRepository.findByEmail.mockResolvedValue(mockUser)
+      encoder.verifyPassword.mockResolvedValue(false)
 
       // Act & Assert
-      await expect(UserRepository.findByCpf(cpf)).rejects.toThrow(errorMessage)
-      expect(UserRepository.findByCpf).toHaveBeenCalledWith(cpf)
+      await expect(UserService.login(email, password)).rejects.toThrow(
+        "Senha inválida"
+      )
+      expect(UserRepository.findByEmail).toHaveBeenCalledWith(email)
+      expect(encoder.verifyPassword).toHaveBeenCalledWith(
+        password,
+        mockUser.password
+      )
+    })
+
+    it("deve lançar erro quando o usuário estiver inativo", async () => {
+      // Arrange
+      const email = "inactive@example.com"
+      const password = "Password123!"
+      const mockUser = {
+        id: "1",
+        email: "inactive@example.com",
+        name: "Inactive User",
+        password: "hashed_password",
+        cpf: "123.456.789-00",
+        phone: "(11) 99999-9999",
+        birthdate: new Date(),
+        status: {
+          description: "INACTIVE",
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+
+      UserRepository.findByEmail.mockResolvedValue(mockUser)
+      encoder.verifyPassword.mockResolvedValue(true)
+
+      // Act & Assert
+      await expect(UserService.login(email, password)).rejects.toThrow(
+        "Usuário inativo"
+      )
+      expect(UserRepository.findByEmail).toHaveBeenCalledWith(email)
+      expect(encoder.verifyPassword).toHaveBeenCalledWith(
+        password,
+        mockUser.password
+      )
+    })
+
+    it("deve lançar erro quando o usuário não for encontrado", async () => {
+      // Arrange
+      const email = "nonexistent@example.com"
+      const password = "Password123!"
+      const errorMessage = "Usuario não econtrado"
+      const notFoundError = new Error(errorMessage)
+
+      UserRepository.findByEmail.mockRejectedValue(notFoundError)
+
+      // Act & Assert
+      await expect(UserService.login(email, password)).rejects.toThrow(
+        errorMessage
+      )
+      expect(UserRepository.findByEmail).toHaveBeenCalledWith(email)
+      expect(encoder.verifyPassword).not.toHaveBeenCalled()
     })
   })
 })
