@@ -1,0 +1,66 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String @id @default(uuid())
+  email    String @unique
+  name     String
+  password String
+  cpf      String @unique
+  phone    String
+  statusId String @map("status_id")
+
+  birthdate DateTime
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  status          UserStatus        @relation(fields: [statusId], references: [id])
+  ActiveUserToken ActiveUserToken[]
+  SessionToken    SessionToken[]
+
+  @@map("users")
+}
+
+model UserStatus {
+  id          String   @id @default(uuid())
+  description String   @unique
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  User        User[]
+
+  @@map("user_status")
+}
+
+model ActiveUserToken {
+  id        String   @id @default(uuid())
+  token     String
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("active_user_token")
+}
+
+model SessionToken {
+  id        String   @id @default(uuid())
+  token     String
+  userId    String   @map("user_id")
+  isValid   Boolean  @default(true) @map("is_valid")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session_token")
+}
